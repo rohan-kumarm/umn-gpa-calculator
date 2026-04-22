@@ -1,9 +1,12 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.min.mjs";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-  "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.worker.min.mjs";
+// pdf.js is loaded via <script> tag in index.html as window.pdfjsLib
+const PDFJS_VERSION = "3.11.174";
+if (window.pdfjsLib) {
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+    `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.worker.min.js`;
+}
 
 /* ---------- Constants ---------- */
 const GRADE_POINTS = {
@@ -518,8 +521,11 @@ function extractLines(items) {
 }
 
 async function parseTranscriptPdf(file) {
+  if (!window.pdfjsLib) {
+    throw new Error("PDF library didn't load. Check your internet connection and reload.");
+  }
   const buffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+  const pdf = await window.pdfjsLib.getDocument({ data: buffer }).promise;
   const allLines = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
