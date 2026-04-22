@@ -184,6 +184,14 @@
       </div>
 
       <p class="hint">Uses your semester courses from the first tab. Only graded (A–F) credits count toward cumulative GPA.</p>
+
+      <div class="history-section" id="history-section" hidden>
+        <div class="history-head-row">
+          <h3>Past terms</h3>
+          <button id="clear-history" class="btn btn-ghost">Clear all</button>
+        </div>
+        <div id="history-list"></div>
+      </div>
     </section>
 
     <section id="whatif" class="panel">
@@ -257,6 +265,9 @@
     <button class="modal-close" data-close aria-label="Close">&times;</button>
     <h3 id="import-title">Import transcript</h3>
     <p id="import-status" class="muted">Parsing your transcript…</p>
+    <div id="import-bulk" class="import-bulk" hidden>
+      <button id="save-all-cumulative" class="btn btn-primary full">Save all graded terms to Cumulative</button>
+    </div>
     <div id="import-terms" class="import-terms"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" data-close>Cancel</button>

@@ -30,6 +30,7 @@ const state = {
   courses: [],
   prior: { gpa: "", credits: "" },
   whatIf: { currentGpa: "", currentCredits: "", targetGpa: "", futureCredits: "" },
+  history: [],       // [{ id, name, gpa, gpaCredits, points, courses:[{name,credits,grade}] }]
 };
 let supabase = null;
 let suppressSync = false; // don't save during initial load
@@ -175,7 +176,7 @@ async function loadUserState() {
   try {
     const { data, error } = await supabase
       .from("user_state")
-      .select("courses, prior, what_if")
+      .select("courses, prior, what_if, history")
       .eq("user_id", state.user.id)
       .maybeSingle();
     if (error) throw error;
@@ -184,10 +185,12 @@ async function loadUserState() {
       state.courses = Array.isArray(data.courses) ? data.courses : [];
       state.prior = data.prior && typeof data.prior === "object" ? data.prior : { gpa: "", credits: "" };
       state.whatIf = data.what_if && typeof data.what_if === "object" ? data.what_if : { currentGpa: "", currentCredits: "", targetGpa: "", futureCredits: "" };
+      state.history = Array.isArray(data.history) ? data.history : [];
     } else {
       state.courses = [];
       state.prior = { gpa: "", credits: "" };
       state.whatIf = { currentGpa: "", currentCredits: "", targetGpa: "", futureCredits: "" };
+      state.history = [];
     }
   } finally {
     suppressSync = false;
@@ -215,6 +218,7 @@ async function saveNow() {
       courses: state.courses,
       prior: state.prior,
       what_if: state.whatIf,
+      history: state.history,
       updated_at: new Date().toISOString(),
     });
     if (error) throw error;
@@ -399,6 +403,7 @@ function renderAll() {
   $("wi-current-credits").value = state.whatIf.currentCredits ?? "";
   $("wi-target-gpa").value = state.whatIf.targetGpa ?? "";
   $("wi-future-credits").value = state.whatIf.futureCredits ?? "";
+  renderHistory();
   recalcAll();
 }
 
@@ -608,14 +613,28 @@ function setImportStatus(text) {
 function renderImportTerms() {
   const parsed = lastImport;
   const container = $("import-terms");
+  const bulk = $("import-bulk");
   container.innerHTML = "";
   if (!parsed || !parsed.terms.length) {
     setImportStatus("No semesters found in this PDF. Make sure it's an unofficial transcript from MyU.");
+    bulk.hidden = true;
     return;
   }
+
+  // Sync applied set with history (handles reopening modal after prior imports)
+  parsed.terms.forEach((t, i) => {
+    if (state.history.some((h) => h.name === t.name)) parsed.applied.add(i);
+  });
+
   const cum = parsed.cumulative;
   const cumText = cum ? `Transcript cumulative: ${cum.gpa.toFixed(3)} GPA · ${cum.gpaCredits} graded credits. ` : "";
-  setImportStatus(`${cumText}Click a graded term to save it to Cumulative, or an in-progress term to load it into the Semester tab.`);
+  setImportStatus(`${cumText}Click "Save all graded terms" below, or pick terms individually. In-progress terms load into the Semester tab.`);
+
+  const hasUnappliedGraded = parsed.terms.some((t, i) => {
+    const isInProgress = t.courses.every((c) => !c.grade);
+    return !isInProgress && !parsed.applied.has(i);
+  });
+  bulk.hidden = !hasUnappliedGraded;
 
   parsed.terms.forEach((t, i) => {
     const isInProgress = t.courses.every((c) => !c.grade);
@@ -624,7 +643,7 @@ function renderImportTerms() {
     btn.className = "term-option";
     btn.dataset.termIndex = String(i);
     btn.dataset.action = isInProgress ? "load-semester" : "add-cumulative";
-    btn.disabled = isApplied;
+    btn.disabled = isApplied && !isInProgress;
     const courseWord = t.courses.length === 1 ? "course" : "courses";
     let summary;
     if (isInProgress) {
@@ -637,6 +656,45 @@ function renderImportTerms() {
     btn.innerHTML = `<strong>${escapeHtml(t.name)}</strong><span>${escapeHtml(summary)}</span>`;
     container.appendChild(btn);
   });
+}
+
+function renderHistory() {
+  const section = $("history-section");
+  const list = $("history-list");
+  list.innerHTML = "";
+  if (!state.history || state.history.length === 0) {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+  for (const entry of state.history) {
+    const details = document.createElement("details");
+    details.className = "history-item";
+    const gpaText = Number.isFinite(entry.gpa) ? entry.gpa.toFixed(3) : "—";
+    const coursesHtml = (entry.courses || [])
+      .map((c) => `
+        <tr>
+          <td>${escapeHtml(c.name || "")}</td>
+          <td class="num">${escapeHtml(String(c.credits ?? ""))}</td>
+          <td class="grade">${escapeHtml(c.grade || "—")}</td>
+        </tr>`)
+      .join("");
+    details.innerHTML = `
+      <summary>
+        <div class="history-summary-main">
+          <strong>${escapeHtml(entry.name)}</strong>
+          <span>GPA ${gpaText} · ${entry.gpaCredits ?? 0} credits · ${(entry.courses || []).length} courses</span>
+        </div>
+        <button class="history-remove" data-remove-history="${entry.id}" type="button">Remove</button>
+      </summary>
+      <table class="history-courses">
+        <thead>
+          <tr><th>Course</th><th class="num">Credits</th><th class="grade">Grade</th></tr>
+        </thead>
+        <tbody>${coursesHtml}</tbody>
+      </table>`;
+    list.appendChild(details);
+  }
 }
 
 function handleTermClick(termIndex) {
@@ -685,6 +743,8 @@ function accumulateTermIntoPrior(termIndex) {
   if (!term || !Number.isFinite(term.points) || !Number.isFinite(term.gpaCredits) || term.gpaCredits <= 0) {
     return false;
   }
+  if (state.history.some((h) => h.name === term.name)) return false;
+
   const existingCredits = parseFloat(state.prior.credits) || 0;
   const existingGpa = parseFloat(state.prior.gpa) || 0;
   const existingPoints = existingGpa * existingCredits;
@@ -699,10 +759,82 @@ function accumulateTermIntoPrior(termIndex) {
     currentGpa: newGpa.toFixed(3),
     currentCredits: String(newCredits),
   };
+  state.history.push({
+    id: uid(),
+    name: term.name,
+    gpa: term.gpa,
+    gpaCredits: term.gpaCredits,
+    points: term.points,
+    courses: term.courses.map((c) => ({ name: c.name, credits: c.credits, grade: c.grade })),
+  });
   lastImport.applied.add(termIndex);
   renderAll();
   scheduleSave();
   return true;
+}
+
+function removeHistoryEntry(entryId) {
+  const idx = state.history.findIndex((h) => h.id === entryId);
+  if (idx === -1) return;
+  const entry = state.history[idx];
+
+  const existingCredits = parseFloat(state.prior.credits) || 0;
+  const existingGpa = parseFloat(state.prior.gpa) || 0;
+  const existingPoints = existingGpa * existingCredits;
+  const newCredits = existingCredits - (entry.gpaCredits || 0);
+  const newPoints = existingPoints - (entry.points || 0);
+  const newGpa = newCredits > 0 ? newPoints / newCredits : 0;
+
+  state.prior.gpa = newCredits > 0 ? newGpa.toFixed(3) : "";
+  state.prior.credits = newCredits > 0 ? String(newCredits) : "";
+  state.whatIf = {
+    ...state.whatIf,
+    currentGpa: newCredits > 0 ? newGpa.toFixed(3) : "",
+    currentCredits: newCredits > 0 ? String(newCredits) : "",
+  };
+  state.history.splice(idx, 1);
+  renderAll();
+  scheduleSave();
+}
+
+function clearHistory() {
+  const totalCredits = state.history.reduce((a, h) => a + (h.gpaCredits || 0), 0);
+  const totalPoints = state.history.reduce((a, h) => a + (h.points || 0), 0);
+  const priorCredits = parseFloat(state.prior.credits) || 0;
+  const priorGpa = parseFloat(state.prior.gpa) || 0;
+  const priorPoints = priorGpa * priorCredits;
+  const remainingCredits = priorCredits - totalCredits;
+  const remainingPoints = priorPoints - totalPoints;
+  const remainingGpa = remainingCredits > 0 ? remainingPoints / remainingCredits : 0;
+
+  state.prior.gpa = remainingCredits > 0 ? remainingGpa.toFixed(3) : "";
+  state.prior.credits = remainingCredits > 0 ? String(remainingCredits) : "";
+  state.whatIf = {
+    ...state.whatIf,
+    currentGpa: remainingCredits > 0 ? remainingGpa.toFixed(3) : "",
+    currentCredits: remainingCredits > 0 ? String(remainingCredits) : "",
+  };
+  state.history = [];
+  renderAll();
+  scheduleSave();
+}
+
+function saveAllGradedToCumulative() {
+  if (!lastImport) return 0;
+  let added = 0;
+  for (let i = 0; i < lastImport.terms.length; i++) {
+    const t = lastImport.terms[i];
+    const isInProgress = t.courses.every((c) => !c.grade);
+    if (isInProgress) continue;
+    if (lastImport.applied.has(i)) continue;
+    if (state.history.some((h) => h.name === t.name)) {
+      lastImport.applied.add(i);
+      continue;
+    }
+    if (accumulateTermIntoPrior(i)) added++;
+  }
+  renderImportTerms();
+  return added;
 }
 
 function loadTermIntoSemester(termIndex) {
@@ -734,8 +866,33 @@ function wireImport() {
   const modal = $("import-modal");
   modal.addEventListener("click", (e) => {
     if (e.target.dataset.close !== undefined) return closeImportModal();
+    if (e.target.id === "save-all-cumulative") {
+      const n = saveAllGradedToCumulative();
+      if (n > 0) {
+        setSyncStatus("saved", `Added ${n} term${n === 1 ? "" : "s"} to Cumulative`);
+        setTimeout(() => {
+          if ($("sync-indicator").classList.contains("saved")) setSyncStatus("", "");
+        }, 2500);
+      }
+      return;
+    }
     const termBtn = e.target.closest(".term-option");
     if (termBtn && !termBtn.disabled) handleTermClick(parseInt(termBtn.dataset.termIndex, 10));
+  });
+
+  $("history-list").addEventListener("click", (e) => {
+    const rm = e.target.closest("[data-remove-history]");
+    if (rm) {
+      e.preventDefault();
+      if (confirm("Remove this term from your Cumulative?")) {
+        removeHistoryEntry(rm.dataset.removeHistory);
+      }
+    }
+  });
+  $("clear-history").addEventListener("click", () => {
+    if (confirm("Clear all past terms? This will subtract them from your Cumulative.")) {
+      clearHistory();
+    }
   });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !modal.hidden) closeImportModal();

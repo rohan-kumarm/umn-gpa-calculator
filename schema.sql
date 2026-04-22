@@ -28,8 +28,13 @@ create table if not exists public.user_state (
   courses jsonb not null default '[]'::jsonb,
   prior   jsonb not null default '{}'::jsonb,
   what_if jsonb not null default '{}'::jsonb,
+  history jsonb not null default '[]'::jsonb,
   updated_at timestamptz not null default now()
 );
+
+-- If user_state already exists from a prior run, add the history column:
+alter table public.user_state
+  add column if not exists history jsonb not null default '[]'::jsonb;
 
 alter table public.user_state enable row level security;
 

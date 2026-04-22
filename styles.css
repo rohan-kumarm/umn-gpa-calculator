@@ -540,6 +540,115 @@ table.courses select:focus {
 .term-option strong { color: var(--maroon); font-size: 14px; }
 .term-option span { color: var(--ink-soft); font-size: 12px; }
 
+.import-bulk { margin: 14px 0 6px; }
+.import-bulk[hidden] { display: none; }
+
+/* Past terms (history) on Cumulative tab */
+.history-section { margin-top: 28px; }
+.history-section[hidden] { display: none; }
+.history-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.history-head-row h3 {
+  margin: 0;
+  color: var(--maroon);
+  font-size: 16px;
+}
+#history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.history-item {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0;
+  box-shadow: var(--shadow);
+}
+.history-item summary {
+  list-style: none;
+  padding: 12px 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.history-item summary::-webkit-details-marker { display: none; }
+.history-item summary::before {
+  content: "▸";
+  color: var(--ink-soft);
+  font-size: 12px;
+  transition: transform 0.15s;
+  display: inline-block;
+}
+.history-item[open] summary::before { transform: rotate(90deg); }
+.history-summary-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.history-summary-main strong {
+  color: var(--maroon);
+  font-size: 14px;
+}
+.history-summary-main span {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.history-remove {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: #fff;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.history-remove:hover {
+  border-color: var(--maroon);
+  color: var(--maroon);
+  background: #fff5f7;
+}
+.history-courses {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  border-top: 1px solid var(--border);
+}
+.history-courses th,
+.history-courses td {
+  padding: 8px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+.history-courses thead th {
+  background: #f6efe2;
+  color: var(--maroon);
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.history-courses tbody tr:last-child td { border-bottom: none; }
+.history-courses td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  width: 70px;
+}
+.history-courses td.grade {
+  text-align: center;
+  width: 60px;
+  font-weight: 700;
+  color: var(--maroon);
+}
+
 @media (max-width: 600px) {
   .user-name { display: none; }
   .site-header h1 { font-size: 20px; }
