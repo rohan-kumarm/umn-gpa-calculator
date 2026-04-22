@@ -408,13 +408,18 @@ function renderAll() {
 }
 
 /* ---------- Wiring ---------- */
+function switchToTab(target) {
+  document.querySelectorAll(".tab").forEach((b) =>
+    b.classList.toggle("active", b.dataset.tab === target)
+  );
+  document.querySelectorAll(".panel").forEach((p) =>
+    p.classList.toggle("active", p.id === target)
+  );
+}
+
 function wireTabs() {
   document.querySelectorAll(".tab").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const target = btn.dataset.tab;
-      document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b === btn));
-      document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.id === target));
-    });
+    btn.addEventListener("click", () => switchToTab(btn.dataset.tab));
   });
 }
 
@@ -738,18 +743,46 @@ async function handleTranscriptFile(file) {
   }
 }
 
+function computeTermTotalsFromCourses(term) {
+  let points = 0;
+  let gpaCredits = 0;
+  for (const c of term.courses || []) {
+    if (c.grade && c.grade in GRADE_POINTS) {
+      const cr = parseFloat(c.credits) || 0;
+      if (cr <= 0) continue;
+      points += cr * GRADE_POINTS[c.grade];
+      gpaCredits += cr;
+    }
+  }
+  return {
+    points,
+    gpaCredits,
+    gpa: gpaCredits > 0 ? points / gpaCredits : 0,
+  };
+}
+
 function accumulateTermIntoPrior(termIndex) {
   const term = lastImport.terms[termIndex];
-  if (!term || !Number.isFinite(term.points) || !Number.isFinite(term.gpaCredits) || term.gpaCredits <= 0) {
-    return false;
-  }
+  if (!term) return false;
   if (state.history.some((h) => h.name === term.name)) return false;
+
+  // Prefer transcript's term totals; fall back to computing from courses.
+  let points = term.points;
+  let gpaCredits = term.gpaCredits;
+  let gpa = term.gpa;
+  if (!Number.isFinite(points) || !Number.isFinite(gpaCredits) || gpaCredits <= 0) {
+    const computed = computeTermTotalsFromCourses(term);
+    points = computed.points;
+    gpaCredits = computed.gpaCredits;
+    gpa = computed.gpa;
+  }
+  if (!Number.isFinite(gpaCredits) || gpaCredits <= 0) return false;
 
   const existingCredits = parseFloat(state.prior.credits) || 0;
   const existingGpa = parseFloat(state.prior.gpa) || 0;
   const existingPoints = existingGpa * existingCredits;
-  const newPoints = existingPoints + term.points;
-  const newCredits = existingCredits + term.gpaCredits;
+  const newPoints = existingPoints + points;
+  const newCredits = existingCredits + gpaCredits;
   const newGpa = newCredits > 0 ? newPoints / newCredits : 0;
 
   state.prior.gpa = newGpa.toFixed(3);
@@ -762,9 +795,9 @@ function accumulateTermIntoPrior(termIndex) {
   state.history.push({
     id: uid(),
     name: term.name,
-    gpa: term.gpa,
-    gpaCredits: term.gpaCredits,
-    points: term.points,
+    gpa,
+    gpaCredits,
+    points,
     courses: term.courses.map((c) => ({ name: c.name, credits: c.credits, grade: c.grade })),
   });
   lastImport.applied.add(termIndex);
@@ -873,6 +906,10 @@ function wireImport() {
         setTimeout(() => {
           if ($("sync-indicator").classList.contains("saved")) setSyncStatus("", "");
         }, 2500);
+        closeImportModal();
+        switchToTab("cumulative");
+      } else {
+        setImportStatus("Nothing new to save — all graded terms are already in Cumulative, or no graded terms were detected.");
       }
       return;
     }
