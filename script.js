@@ -459,6 +459,7 @@ function wireCourseTable() {
   });
 
   $("add-course").addEventListener("click", addCourse);
+  $("save-semester").addEventListener("click", saveCurrentSemesterToCumulative);
   $("clear-courses").addEventListener("click", () => {
     if (confirm("Remove all courses?")) clearCourses();
   });
@@ -628,7 +629,7 @@ function renderImportTerms() {
 
   // Sync applied set with history (handles reopening modal after prior imports)
   parsed.terms.forEach((t, i) => {
-    if (state.history.some((h) => h.name === t.name)) parsed.applied.add(i);
+    if (state.history.some((h) => termKey(h.name) === termKey(t.name))) parsed.applied.add(i);
   });
 
   const cum = parsed.cumulative;
@@ -743,6 +744,10 @@ async function handleTranscriptFile(file) {
   }
 }
 
+function termKey(name) {
+  return String(name || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
 function computeTermTotalsFromCourses(term) {
   let points = 0;
   let gpaCredits = 0;
@@ -764,7 +769,7 @@ function computeTermTotalsFromCourses(term) {
 function accumulateTermIntoPrior(termIndex) {
   const term = lastImport.terms[termIndex];
   if (!term) return false;
-  if (state.history.some((h) => h.name === term.name)) return false;
+  if (state.history.some((h) => termKey(h.name) === termKey(term.name))) return false;
 
   // Prefer transcript's term totals; fall back to computing from courses.
   let points = term.points;
@@ -860,7 +865,7 @@ function saveAllGradedToCumulative() {
     const isInProgress = t.courses.every((c) => !c.grade);
     if (isInProgress) continue;
     if (lastImport.applied.has(i)) continue;
-    if (state.history.some((h) => h.name === t.name)) {
+    if (state.history.some((h) => termKey(h.name) === termKey(t.name))) {
       lastImport.applied.add(i);
       continue;
     }
@@ -868,6 +873,69 @@ function saveAllGradedToCumulative() {
   }
   renderImportTerms();
   return added;
+}
+
+function suggestTermName() {
+  const now = new Date();
+  const m = now.getMonth(); // 0-11
+  const y = now.getFullYear();
+  let season;
+  if (m <= 4) season = "Spring";
+  else if (m <= 6) season = "Summer";
+  else season = "Fall";
+  return `${season} ${y}`;
+}
+
+function saveCurrentSemesterToCumulative() {
+  const sem = computeSemester();
+  if (sem.gradedCredits <= 0) {
+    alert("No graded courses to save. Add courses with A–F grades first.");
+    return;
+  }
+  const name = prompt('Name this term (e.g. "Spring 2026"):', suggestTermName());
+  if (name === null) return;
+  const trimmed = name.trim();
+  if (!trimmed) {
+    alert("Term name can't be empty.");
+    return;
+  }
+  if (state.history.some((h) => termKey(h.name) === termKey(trimmed))) {
+    alert(`"${trimmed}" is already in your Cumulative. Remove it first or use a different name.`);
+    return;
+  }
+
+  const existingCredits = parseFloat(state.prior.credits) || 0;
+  const existingGpa = parseFloat(state.prior.gpa) || 0;
+  const existingPoints = existingGpa * existingCredits;
+  const newPoints = existingPoints + sem.qualityPoints;
+  const newCredits = existingCredits + sem.gradedCredits;
+  const newGpa = newCredits > 0 ? newPoints / newCredits : 0;
+
+  state.prior.gpa = newGpa.toFixed(3);
+  state.prior.credits = String(newCredits);
+  state.whatIf = {
+    ...state.whatIf,
+    currentGpa: newGpa.toFixed(3),
+    currentCredits: String(newCredits),
+  };
+  state.history.push({
+    id: uid(),
+    name: trimmed,
+    gpa: sem.gpa,
+    gpaCredits: sem.gradedCredits,
+    points: sem.qualityPoints,
+    courses: state.courses
+      .filter((c) => c.name || c.credits || c.grade)
+      .map((c) => ({ name: c.name, credits: c.credits, grade: c.grade })),
+  });
+  state.courses = [{ id: uid(), name: "", credits: "", grade: "" }];
+  renderAll();
+  scheduleSave();
+  switchToTab("cumulative");
+  setSyncStatus("saved", `Added ${trimmed} to Cumulative`);
+  setTimeout(() => {
+    if ($("sync-indicator").classList.contains("saved")) setSyncStatus("", "");
+  }, 2500);
 }
 
 function loadTermIntoSemester(termIndex) {
