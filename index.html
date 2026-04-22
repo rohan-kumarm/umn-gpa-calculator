@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>UMN GPA Calculator</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- SETUP SCREEN: shown until config.js is filled in -->
+<div id="setup-screen" class="screen" hidden>
+  <div class="container auth-wrap">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <span class="brand-mark">M</span>
+        <div>
+          <h1>UMN GPA Calculator</h1>
+          <p class="tagline">Setup needed</p>
+        </div>
+      </div>
+      <h2>Connect Supabase</h2>
+      <p class="muted">Open <code>config.js</code> and paste your Supabase project URL and anon key. Then run <code>schema.sql</code> in the Supabase SQL Editor and turn off "Confirm email" in Auth settings.</p>
+      <ol class="setup-list">
+        <li>Create a free project at <strong>supabase.com</strong></li>
+        <li>Project Settings &rarr; API &rarr; copy <em>Project URL</em> and <em>anon/public</em> key into <code>config.js</code></li>
+        <li>SQL Editor &rarr; paste the contents of <code>schema.sql</code> &rarr; Run</li>
+        <li>Authentication &rarr; Providers &rarr; Email &rarr; toggle <strong>Confirm email</strong> off</li>
+        <li>Reload this page</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- AUTH SCREEN: signup/login -->
+<div id="auth-screen" class="screen" hidden>
+  <div class="container auth-wrap">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <span class="brand-mark">M</span>
+        <div>
+          <h1>UMN GPA Calculator</h1>
+          <p class="tagline">Sign in to continue</p>
+        </div>
+      </div>
+
+      <div class="auth-tabs" role="tablist">
+        <button class="auth-tab active" data-auth-tab="login" role="tab">Log in</button>
+        <button class="auth-tab" data-auth-tab="signup" role="tab">Sign up</button>
+      </div>
+
+      <form id="login-form" class="auth-form active">
+        <label class="field">
+          <span>Username</span>
+          <input name="username" type="text" autocomplete="username" required minlength="3" maxlength="30" pattern="[a-zA-Z0-9_\.\-]+" />
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <input name="password" type="password" autocomplete="current-password" required minlength="6" />
+        </label>
+        <button type="submit" class="btn btn-primary full">Log in</button>
+        <p class="form-error" data-error="login"></p>
+      </form>
+
+      <form id="signup-form" class="auth-form">
+        <label class="field">
+          <span>Choose a username</span>
+          <input name="username" type="text" autocomplete="username" required minlength="3" maxlength="30" pattern="[a-zA-Z0-9_\.\-]+" />
+          <small class="hint">Letters, numbers, dot, dash, underscore. 3-30 characters.</small>
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <input name="password" type="password" autocomplete="new-password" required minlength="6" />
+          <small class="hint">Minimum 6 characters.</small>
+        </label>
+        <button type="submit" class="btn btn-primary full">Create account</button>
+        <p class="form-error" data-error="signup"></p>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- APP SCREEN: the calculator -->
+<div id="app-screen" class="screen" hidden>
+  <header class="site-header">
+    <div class="container header-inner">
+      <div class="brand">
+        <span class="brand-mark">M</span>
+        <div>
+          <h1>UMN GPA Calculator</h1>
+          <p class="tagline">University of Minnesota &middot; 4.0 scale</p>
+        </div>
+      </div>
+      <div class="user-box">
+        <span class="user-avatar" id="user-avatar">?</span>
+        <span class="user-name" id="user-name">—</span>
+        <button id="logout-btn" class="btn btn-ghost-light">Log out</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <div id="sync-indicator" class="sync-indicator" aria-live="polite"></div>
+
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="semester" role="tab">Semester</button>
+      <button class="tab" data-tab="cumulative" role="tab">Cumulative</button>
+      <button class="tab" data-tab="whatif" role="tab">What-If</button>
+    </nav>
+
+    <section id="semester" class="panel active">
+      <div class="panel-head">
+        <h2>Semester GPA</h2>
+        <p>Add your courses to calculate this term's GPA. S/N and P/F courses are excluded from the GPA but still shown.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table class="courses">
+          <thead>
+            <tr>
+              <th class="col-name">Course</th>
+              <th class="col-credits">Credits</th>
+              <th class="col-grade">Grade</th>
+              <th class="col-actions" aria-label="Actions"></th>
+            </tr>
+          </thead>
+          <tbody id="course-body"></tbody>
+        </table>
+      </div>
+
+      <div class="actions-row">
+        <button id="add-course" class="btn btn-secondary">+ Add course</button>
+        <button id="clear-courses" class="btn btn-ghost">Clear all</button>
+      </div>
+
+      <div class="results-grid">
+        <div class="result-card">
+          <span class="result-label">Semester GPA</span>
+          <span id="semester-gpa" class="result-value">0.000</span>
+        </div>
+        <div class="result-card">
+          <span class="result-label">Graded credits</span>
+          <span id="graded-credits" class="result-value">0</span>
+        </div>
+        <div class="result-card">
+          <span class="result-label">Total credits</span>
+          <span id="total-credits" class="result-value">0</span>
+        </div>
+        <div class="result-card">
+          <span class="result-label">Quality points</span>
+          <span id="quality-points" class="result-value">0.00</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="cumulative" class="panel">
+      <div class="panel-head">
+        <h2>Cumulative GPA</h2>
+        <p>Combine your prior transcript record with this semester's courses.</p>
+      </div>
+
+      <div class="input-grid">
+        <label class="field">
+          <span>Prior GPA</span>
+          <input id="prior-gpa" type="number" step="0.001" min="0" max="4" placeholder="e.g. 3.420" />
+        </label>
+        <label class="field">
+          <span>Prior graded credits</span>
+          <input id="prior-credits" type="number" step="0.5" min="0" placeholder="e.g. 58" />
+        </label>
+      </div>
+
+      <div class="results-grid">
+        <div class="result-card highlight">
+          <span class="result-label">Cumulative GPA</span>
+          <span id="cumulative-gpa" class="result-value">—</span>
+        </div>
+        <div class="result-card">
+          <span class="result-label">Total graded credits</span>
+          <span id="cumulative-credits" class="result-value">0</span>
+        </div>
+      </div>
+
+      <p class="hint">Uses your semester courses from the first tab. Only graded (A–F) credits count toward cumulative GPA.</p>
+    </section>
+
+    <section id="whatif" class="panel">
+      <div class="panel-head">
+        <h2>What-If Calculator</h2>
+        <p>Find out what GPA you need in future credits to reach a target cumulative GPA.</p>
+      </div>
+
+      <div class="input-grid">
+        <label class="field">
+          <span>Current GPA</span>
+          <input id="wi-current-gpa" type="number" step="0.001" min="0" max="4" placeholder="e.g. 3.200" />
+        </label>
+        <label class="field">
+          <span>Current graded credits</span>
+          <input id="wi-current-credits" type="number" step="0.5" min="0" placeholder="e.g. 45" />
+        </label>
+        <label class="field">
+          <span>Target GPA</span>
+          <input id="wi-target-gpa" type="number" step="0.001" min="0" max="4" placeholder="e.g. 3.500" />
+        </label>
+        <label class="field">
+          <span>Future credits to take</span>
+          <input id="wi-future-credits" type="number" step="0.5" min="0" placeholder="e.g. 30" />
+        </label>
+      </div>
+
+      <div class="results-grid">
+        <div class="result-card highlight">
+          <span class="result-label">GPA needed on future credits</span>
+          <span id="wi-needed" class="result-value">—</span>
+        </div>
+        <div class="result-card">
+          <span class="result-label">Projected cumulative</span>
+          <span id="wi-projected" class="result-value">—</span>
+        </div>
+      </div>
+      <p id="wi-message" class="hint"></p>
+    </section>
+
+    <section class="scale-card">
+      <h3>UMN Grade Scale</h3>
+      <div class="scale-grid">
+        <div><strong>A</strong> 4.000</div>
+        <div><strong>A-</strong> 3.667</div>
+        <div><strong>B+</strong> 3.333</div>
+        <div><strong>B</strong> 3.000</div>
+        <div><strong>B-</strong> 2.667</div>
+        <div><strong>C+</strong> 2.333</div>
+        <div><strong>C</strong> 2.000</div>
+        <div><strong>C-</strong> 1.667</div>
+        <div><strong>D+</strong> 1.333</div>
+        <div><strong>D</strong> 1.000</div>
+        <div><strong>F</strong> 0.000</div>
+        <div><strong>S/N, P/F</strong> excluded</div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>Unofficial tool. Your data is stored in your Supabase project.</p>
+    </div>
+  </footer>
+</div>
+
+<script type="module" src="script.js"></script>
+</body>
+</html>
