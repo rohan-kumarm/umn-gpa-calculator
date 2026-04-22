@@ -605,131 +605,120 @@ function setImportStatus(text) {
   $("import-status").textContent = text;
 }
 
-function renderImportTerms(parsed) {
+function renderImportTerms() {
+  const parsed = lastImport;
   const container = $("import-terms");
   container.innerHTML = "";
-  if (!parsed.terms.length) {
+  if (!parsed || !parsed.terms.length) {
     setImportStatus("No semesters found in this PDF. Make sure it's an unofficial transcript from MyU.");
     return;
   }
   const cum = parsed.cumulative;
-  const cumText = cum ? `Overall GPA ${cum.gpa.toFixed(3)} · ${cum.gpaCredits} graded credits` : "";
-  setImportStatus(`Found ${parsed.terms.length} term${parsed.terms.length === 1 ? "" : "s"}. ${cumText} Click one to load into the Semester tab.`);
+  const cumText = cum ? `Transcript cumulative: ${cum.gpa.toFixed(3)} GPA · ${cum.gpaCredits} graded credits. ` : "";
+  setImportStatus(`${cumText}Click a graded term to save it to Cumulative, or an in-progress term to load it into the Semester tab.`);
 
-  for (let i = 0; i < parsed.terms.length; i++) {
-    const t = parsed.terms[i];
+  parsed.terms.forEach((t, i) => {
+    const isInProgress = t.courses.every((c) => !c.grade);
+    const isApplied = parsed.applied.has(i);
     const btn = document.createElement("button");
     btn.className = "term-option";
     btn.dataset.termIndex = String(i);
-    const isInProgress = t.courses.every((c) => !c.grade);
-    const summary = isInProgress
-      ? `In progress · ${t.courses.length} course${t.courses.length === 1 ? "" : "s"}`
-      : `GPA ${Number.isFinite(t.gpa) ? t.gpa.toFixed(3) : "—"} · ${t.gpaCredits ?? ""} credits · ${t.courses.length} course${t.courses.length === 1 ? "" : "s"}`;
+    btn.dataset.action = isInProgress ? "load-semester" : "add-cumulative";
+    btn.disabled = isApplied;
+    const courseWord = t.courses.length === 1 ? "course" : "courses";
+    let summary;
+    if (isInProgress) {
+      summary = `In progress · ${t.courses.length} ${courseWord} · Load into Semester tab`;
+    } else if (isApplied) {
+      summary = `✓ Added to Cumulative (${Number.isFinite(t.gpa) ? t.gpa.toFixed(3) : "—"} GPA, ${t.gpaCredits ?? ""} credits)`;
+    } else {
+      summary = `GPA ${Number.isFinite(t.gpa) ? t.gpa.toFixed(3) : "—"} · ${t.gpaCredits ?? ""} credits · ${t.courses.length} ${courseWord} · Save to Cumulative`;
+    }
     btn.innerHTML = `<strong>${escapeHtml(t.name)}</strong><span>${escapeHtml(summary)}</span>`;
     container.appendChild(btn);
+  });
+}
+
+function handleTermClick(termIndex) {
+  if (!lastImport) return;
+  const term = lastImport.terms[termIndex];
+  if (!term) return;
+  const isInProgress = term.courses.every((c) => !c.grade);
+
+  if (isInProgress) {
+    loadTermIntoSemester(termIndex);
+    closeImportModal();
+    setSyncStatus("saved", `Loaded ${term.name} into Semester tab`);
+    setTimeout(() => {
+      if ($("sync-indicator").classList.contains("saved")) setSyncStatus("", "");
+    }, 2500);
+  } else {
+    if (lastImport.applied.has(termIndex)) return;
+    const ok = accumulateTermIntoPrior(termIndex);
+    if (ok) {
+      renderImportTerms();
+      setSyncStatus("saved", `Added ${term.name} to Cumulative`);
+      setTimeout(() => {
+        if ($("sync-indicator").classList.contains("saved")) setSyncStatus("", "");
+      }, 2500);
+    }
   }
 }
 
-function applyTerm(termIndex) {
-  if (!lastImport) return;
-  const term = lastImport.terms[termIndex];
-  const cum = lastImport.cumulative;
-  if (!term) return;
+async function handleTranscriptFile(file) {
+  if (!file) return;
+  openImportModal();
+  setImportStatus("Parsing your transcript…");
+  $("import-terms").innerHTML = "";
+  try {
+    const parsed = await parseTranscriptPdf(file);
+    parsed.applied = new Set();
+    lastImport = parsed;
+    renderImportTerms();
+  } catch (err) {
+    setImportStatus(`Couldn't read the PDF: ${err.message || err}`);
+  }
+}
 
+function accumulateTermIntoPrior(termIndex) {
+  const term = lastImport.terms[termIndex];
+  if (!term || !Number.isFinite(term.points) || !Number.isFinite(term.gpaCredits) || term.gpaCredits <= 0) {
+    return false;
+  }
+  const existingCredits = parseFloat(state.prior.credits) || 0;
+  const existingGpa = parseFloat(state.prior.gpa) || 0;
+  const existingPoints = existingGpa * existingCredits;
+  const newPoints = existingPoints + term.points;
+  const newCredits = existingCredits + term.gpaCredits;
+  const newGpa = newCredits > 0 ? newPoints / newCredits : 0;
+
+  state.prior.gpa = newGpa.toFixed(3);
+  state.prior.credits = String(newCredits);
+  state.whatIf = {
+    ...state.whatIf,
+    currentGpa: newGpa.toFixed(3),
+    currentCredits: String(newCredits),
+  };
+  lastImport.applied.add(termIndex);
+  renderAll();
+  scheduleSave();
+  return true;
+}
+
+function loadTermIntoSemester(termIndex) {
+  const term = lastImport.terms[termIndex];
+  if (!term) return;
   state.courses = term.courses.map((c) => ({
     id: uid(),
     name: c.name,
     credits: c.credits,
     grade: c.grade,
   }));
-
-  const isInProgress = term.courses.every((c) => !c.grade);
-  if (cum) {
-    let priorGpa = cum.gpa;
-    let priorCredits = cum.gpaCredits;
-    if (!isInProgress && Number.isFinite(term.points) && Number.isFinite(term.gpaCredits) && term.gpaCredits > 0) {
-      const remainingCredits = cum.gpaCredits - term.gpaCredits;
-      const remainingPoints = cum.points - term.points;
-      if (remainingCredits > 0) {
-        priorGpa = remainingPoints / remainingCredits;
-        priorCredits = remainingCredits;
-      } else {
-        priorGpa = 0;
-        priorCredits = 0;
-      }
-    }
-    state.prior = {
-      gpa: priorCredits > 0 ? priorGpa.toFixed(3) : "",
-      credits: String(priorCredits || ""),
-    };
-    state.whatIf = {
-      ...state.whatIf,
-      currentGpa: cum.gpa.toFixed(3),
-      currentCredits: String(cum.gpaCredits),
-    };
-  }
-
-  renderAll();
-  scheduleSave();
-  closeImportModal();
-}
-
-async function handleTranscriptFile(file) {
-  if (!file) return;
-  const hasExisting = state.courses.some(
-    (c) => (c.name && c.name.trim()) || c.grade || (c.credits && String(c.credits).trim())
-  );
-  if (hasExisting && !confirm("Replace your current courses with the transcript?")) return;
-
-  setSyncStatus("saving", "Parsing transcript…");
-  try {
-    const parsed = await parseTranscriptPdf(file);
-    lastImport = parsed;
-    applyAllCourses(parsed);
-  } catch (err) {
-    setSyncStatus("error", `Import failed: ${err.message || err}`);
-  }
-}
-
-function applyAllCourses(parsed) {
-  const allCourses = [];
-  for (const term of parsed.terms) {
-    for (const c of term.courses) {
-      allCourses.push({
-        id: uid(),
-        name: c.name,
-        credits: c.credits,
-        grade: c.grade,
-      });
-    }
-  }
-
-  if (allCourses.length === 0) {
-    setSyncStatus("error", "No courses found in that PDF.");
-    return;
-  }
-
-  state.courses = allCourses;
-  state.prior = { gpa: "", credits: "" };
-  if (parsed.cumulative) {
-    state.whatIf = {
-      ...state.whatIf,
-      currentGpa: parsed.cumulative.gpa.toFixed(3),
-      currentCredits: String(parsed.cumulative.gpaCredits),
-    };
+  if (state.courses.length === 0) {
+    state.courses.push({ id: uid(), name: "", credits: "", grade: "" });
   }
   renderAll();
   scheduleSave();
-  const termWord = parsed.terms.length === 1 ? "term" : "terms";
-  const courseWord = allCourses.length === 1 ? "course" : "courses";
-  setSyncStatus(
-    "saved",
-    `Imported ${allCourses.length} ${courseWord} from ${parsed.terms.length} ${termWord}`
-  );
-  setTimeout(() => {
-    const el = $("sync-indicator");
-    if (el.classList.contains("saved")) setSyncStatus("", "");
-  }, 3000);
 }
 
 function wireImport() {
@@ -744,9 +733,9 @@ function wireImport() {
 
   const modal = $("import-modal");
   modal.addEventListener("click", (e) => {
-    if (e.target.dataset.close !== undefined) closeImportModal();
+    if (e.target.dataset.close !== undefined) return closeImportModal();
     const termBtn = e.target.closest(".term-option");
-    if (termBtn) applyTerm(parseInt(termBtn.dataset.termIndex, 10));
+    if (termBtn && !termBtn.disabled) handleTermClick(parseInt(termBtn.dataset.termIndex, 10));
   });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !modal.hidden) closeImportModal();

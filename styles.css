@@ -528,9 +528,14 @@ table.courses select:focus {
   font: inherit;
   color: inherit;
 }
-.term-option:hover {
+.term-option:hover:not(:disabled) {
   border-color: var(--maroon);
   background: #fff5f7;
+}
+.term-option:disabled {
+  opacity: 0.65;
+  cursor: default;
+  background: #f6efe2;
 }
 .term-option strong { color: var(--maroon); font-size: 14px; }
 .term-option span { color: var(--ink-soft); font-size: 12px; }
