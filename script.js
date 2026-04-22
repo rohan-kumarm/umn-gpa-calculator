@@ -1,5 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.min.mjs";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.worker.min.mjs";
 
 /* ---------- Constants ---------- */
 const GRADE_POINTS = {
@@ -483,6 +487,222 @@ function wireAuth() {
   $("logout-btn").addEventListener("click", handleLogout);
 }
 
+/* ---------- Transcript import ---------- */
+const TERM_RE = /^(Fall|Spring|Summer|Winter|May)\s+Semester\s+(\d{4})$/i;
+const COURSE_RE = /^([A-Z]{2,5})\s+(\d{3,4}[A-Z]?)\s+(.+?)\s+([\d.]+)\s+([\d.]+)(?:\s+([A-F][+-]?|S|N|P|W|I))?\s+([\d.]+)$/;
+const TERM_GPA_RE = /^TERM\s*GPA\s*:?\s*([\d.]+)\s+TERM\s*TOTALS\s*:?\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)$/i;
+const CUM_GPA_RE = /^CUM\s*GPA\s*:?\s*([\d.]+)\s+UM\s*TOTALS\s*:?\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)$/i;
+const VALID_GRADES = new Set([...Object.keys(GRADE_POINTS), "S", "N", "P"]);
+
+let lastImport = null; // { terms, cumulative }
+
+function extractLines(items) {
+  const rows = new Map();
+  for (const item of items) {
+    if (!item.str || !item.str.trim()) continue;
+    const y = Math.round(item.transform[5]);
+    if (!rows.has(y)) rows.set(y, []);
+    rows.get(y).push(item);
+  }
+  const ys = [...rows.keys()].sort((a, b) => b - a);
+  return ys
+    .map((y) =>
+      rows.get(y)
+        .sort((a, b) => a.transform[4] - b.transform[4])
+        .map((i) => i.str)
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim()
+    )
+    .filter((l) => l.length > 0);
+}
+
+async function parseTranscriptPdf(file) {
+  const buffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+  const allLines = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    allLines.push(...extractLines(content.items));
+  }
+  return parseLines(allLines);
+}
+
+function parseLines(lines) {
+  const terms = [];
+  let currentTerm = null;
+  let cumulative = null;
+
+  for (const raw of lines) {
+    const line = raw.trim();
+
+    const tMatch = line.match(TERM_RE);
+    if (tMatch) {
+      if (currentTerm) terms.push(currentTerm);
+      currentTerm = { name: `${capitalize(tMatch[1])} ${tMatch[2]}`, courses: [] };
+      continue;
+    }
+
+    const tgMatch = line.match(TERM_GPA_RE);
+    if (tgMatch && currentTerm) {
+      currentTerm.gpa = parseFloat(tgMatch[1]);
+      currentTerm.attempted = parseFloat(tgMatch[2]);
+      currentTerm.earned = parseFloat(tgMatch[3]);
+      currentTerm.gpaCredits = parseFloat(tgMatch[4]);
+      currentTerm.points = parseFloat(tgMatch[5]);
+      terms.push(currentTerm);
+      currentTerm = null;
+      continue;
+    }
+
+    const cMatch = line.match(CUM_GPA_RE);
+    if (cMatch) {
+      cumulative = {
+        gpa: parseFloat(cMatch[1]),
+        attempted: parseFloat(cMatch[2]),
+        earned: parseFloat(cMatch[3]),
+        gpaCredits: parseFloat(cMatch[4]),
+        points: parseFloat(cMatch[5]),
+      };
+      continue;
+    }
+
+    const courseMatch = line.match(COURSE_RE);
+    if (courseMatch && currentTerm) {
+      const [, dept, num, desc, attempted, _earned, grade] = courseMatch;
+      const normalizedGrade = grade && VALID_GRADES.has(grade) ? grade : "";
+      currentTerm.courses.push({
+        name: `${dept} ${num} ${desc.trim()}`,
+        credits: attempted,
+        grade: normalizedGrade,
+      });
+    }
+  }
+
+  if (currentTerm) terms.push(currentTerm);
+  return { terms, cumulative };
+}
+
+function capitalize(s) {
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+
+function openImportModal() {
+  $("import-modal").hidden = false;
+}
+function closeImportModal() {
+  $("import-modal").hidden = true;
+}
+
+function setImportStatus(text) {
+  $("import-status").textContent = text;
+}
+
+function renderImportTerms(parsed) {
+  const container = $("import-terms");
+  container.innerHTML = "";
+  if (!parsed.terms.length) {
+    setImportStatus("No semesters found in this PDF. Make sure it's an unofficial transcript from MyU.");
+    return;
+  }
+  const cum = parsed.cumulative;
+  const cumText = cum ? `Overall GPA ${cum.gpa.toFixed(3)} · ${cum.gpaCredits} graded credits` : "";
+  setImportStatus(`Found ${parsed.terms.length} term${parsed.terms.length === 1 ? "" : "s"}. ${cumText} Click one to load into the Semester tab.`);
+
+  for (let i = 0; i < parsed.terms.length; i++) {
+    const t = parsed.terms[i];
+    const btn = document.createElement("button");
+    btn.className = "term-option";
+    btn.dataset.termIndex = String(i);
+    const isInProgress = t.courses.every((c) => !c.grade);
+    const summary = isInProgress
+      ? `In progress · ${t.courses.length} course${t.courses.length === 1 ? "" : "s"}`
+      : `GPA ${Number.isFinite(t.gpa) ? t.gpa.toFixed(3) : "—"} · ${t.gpaCredits ?? ""} credits · ${t.courses.length} course${t.courses.length === 1 ? "" : "s"}`;
+    btn.innerHTML = `<strong>${escapeHtml(t.name)}</strong><span>${escapeHtml(summary)}</span>`;
+    container.appendChild(btn);
+  }
+}
+
+function applyTerm(termIndex) {
+  if (!lastImport) return;
+  const term = lastImport.terms[termIndex];
+  const cum = lastImport.cumulative;
+  if (!term) return;
+
+  state.courses = term.courses.map((c) => ({
+    id: uid(),
+    name: c.name,
+    credits: c.credits,
+    grade: c.grade,
+  }));
+
+  const isInProgress = term.courses.every((c) => !c.grade);
+  if (cum) {
+    let priorGpa = cum.gpa;
+    let priorCredits = cum.gpaCredits;
+    if (!isInProgress && Number.isFinite(term.points) && Number.isFinite(term.gpaCredits) && term.gpaCredits > 0) {
+      const remainingCredits = cum.gpaCredits - term.gpaCredits;
+      const remainingPoints = cum.points - term.points;
+      if (remainingCredits > 0) {
+        priorGpa = remainingPoints / remainingCredits;
+        priorCredits = remainingCredits;
+      } else {
+        priorGpa = 0;
+        priorCredits = 0;
+      }
+    }
+    state.prior = {
+      gpa: priorCredits > 0 ? priorGpa.toFixed(3) : "",
+      credits: String(priorCredits || ""),
+    };
+    state.whatIf = {
+      ...state.whatIf,
+      currentGpa: cum.gpa.toFixed(3),
+      currentCredits: String(cum.gpaCredits),
+    };
+  }
+
+  renderAll();
+  scheduleSave();
+  closeImportModal();
+}
+
+async function handleTranscriptFile(file) {
+  if (!file) return;
+  openImportModal();
+  setImportStatus("Parsing your transcript…");
+  $("import-terms").innerHTML = "";
+  try {
+    const parsed = await parseTranscriptPdf(file);
+    lastImport = parsed;
+    renderImportTerms(parsed);
+  } catch (err) {
+    setImportStatus(`Couldn't read the PDF: ${err.message || err}`);
+  }
+}
+
+function wireImport() {
+  const btn = $("import-transcript");
+  const input = $("transcript-file");
+  btn.addEventListener("click", () => input.click());
+  input.addEventListener("change", (e) => {
+    const file = e.target.files && e.target.files[0];
+    handleTranscriptFile(file);
+    input.value = "";
+  });
+
+  const modal = $("import-modal");
+  modal.addEventListener("click", (e) => {
+    if (e.target.dataset.close !== undefined) closeImportModal();
+    const termBtn = e.target.closest(".term-option");
+    if (termBtn) applyTerm(parseInt(termBtn.dataset.termIndex, 10));
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !modal.hidden) closeImportModal();
+  });
+}
+
 /* ---------- Init ---------- */
 async function init() {
   if (!isConfigured()) {
@@ -500,6 +720,7 @@ async function init() {
   wireCourseTable();
   wireCumulative();
   wireWhatIf();
+  wireImport();
 
   const { data: { session } } = await supabase.auth.getSession();
   if (session?.user) {

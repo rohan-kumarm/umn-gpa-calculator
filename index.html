@@ -130,7 +130,9 @@
 
       <div class="actions-row">
         <button id="add-course" class="btn btn-secondary">+ Add course</button>
+        <button id="import-transcript" class="btn btn-ghost">Import transcript (PDF)</button>
         <button id="clear-courses" class="btn btn-ghost">Clear all</button>
+        <input type="file" id="transcript-file" accept="application/pdf" hidden />
       </div>
 
       <div class="results-grid">
@@ -246,6 +248,20 @@
       <p>Unofficial tool. Your data is stored in your Supabase project.</p>
     </div>
   </footer>
+</div>
+
+<!-- Import transcript modal -->
+<div id="import-modal" class="modal" hidden>
+  <div class="modal-backdrop" data-close></div>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="import-title">
+    <button class="modal-close" data-close aria-label="Close">&times;</button>
+    <h3 id="import-title">Import transcript</h3>
+    <p id="import-status" class="muted">Parsing your transcript…</p>
+    <div id="import-terms" class="import-terms"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" data-close>Cancel</button>
+    </div>
+  </div>
 </div>
 
 <script type="module" src="script.js"></script>
