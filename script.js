@@ -676,16 +676,60 @@ function applyTerm(termIndex) {
 
 async function handleTranscriptFile(file) {
   if (!file) return;
-  openImportModal();
-  setImportStatus("Parsing your transcript…");
-  $("import-terms").innerHTML = "";
+  const hasExisting = state.courses.some(
+    (c) => (c.name && c.name.trim()) || c.grade || (c.credits && String(c.credits).trim())
+  );
+  if (hasExisting && !confirm("Replace your current courses with the transcript?")) return;
+
+  setSyncStatus("saving", "Parsing transcript…");
   try {
     const parsed = await parseTranscriptPdf(file);
     lastImport = parsed;
-    renderImportTerms(parsed);
+    applyAllCourses(parsed);
   } catch (err) {
-    setImportStatus(`Couldn't read the PDF: ${err.message || err}`);
+    setSyncStatus("error", `Import failed: ${err.message || err}`);
   }
+}
+
+function applyAllCourses(parsed) {
+  const allCourses = [];
+  for (const term of parsed.terms) {
+    for (const c of term.courses) {
+      allCourses.push({
+        id: uid(),
+        name: c.name,
+        credits: c.credits,
+        grade: c.grade,
+      });
+    }
+  }
+
+  if (allCourses.length === 0) {
+    setSyncStatus("error", "No courses found in that PDF.");
+    return;
+  }
+
+  state.courses = allCourses;
+  state.prior = { gpa: "", credits: "" };
+  if (parsed.cumulative) {
+    state.whatIf = {
+      ...state.whatIf,
+      currentGpa: parsed.cumulative.gpa.toFixed(3),
+      currentCredits: String(parsed.cumulative.gpaCredits),
+    };
+  }
+  renderAll();
+  scheduleSave();
+  const termWord = parsed.terms.length === 1 ? "term" : "terms";
+  const courseWord = allCourses.length === 1 ? "course" : "courses";
+  setSyncStatus(
+    "saved",
+    `Imported ${allCourses.length} ${courseWord} from ${parsed.terms.length} ${termWord}`
+  );
+  setTimeout(() => {
+    const el = $("sync-indicator");
+    if (el.classList.contains("saved")) setSyncStatus("", "");
+  }, 3000);
 }
 
 function wireImport() {
