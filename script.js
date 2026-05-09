@@ -324,17 +324,28 @@ function recalcCumulative(semesterResult) {
   const priorCredits = parseFloat(state.prior.credits);
   const sem = semesterResult || computeSemester();
   const priorValid = Number.isFinite(priorGpa) && Number.isFinite(priorCredits) && priorCredits >= 0 && priorGpa >= 0;
+  const potentialEl = $("potential-cumulative-gpa");
+  const potentialHint = $("potential-cumulative-hint");
 
   if (!priorValid) {
-    $("cumulative-gpa").textContent = sem.gradedCredits > 0 ? fmtGpa(sem.gpa) : "—";
+    const fallback = sem.gradedCredits > 0 ? fmtGpa(sem.gpa) : "—";
+    $("cumulative-gpa").textContent = fallback;
     $("cumulative-credits").textContent = sem.gradedCredits || 0;
+    if (potentialEl) potentialEl.textContent = fallback;
+    if (potentialHint) potentialHint.textContent = "Add prior GPA in Cumulative tab";
     return;
   }
   const totalPoints = priorGpa * priorCredits + sem.qualityPoints;
   const totalCredits = priorCredits + sem.gradedCredits;
   const cumGpa = totalCredits > 0 ? totalPoints / totalCredits : 0;
-  $("cumulative-gpa").textContent = totalCredits > 0 ? fmtGpa(cumGpa) : "—";
+  const cumText = totalCredits > 0 ? fmtGpa(cumGpa) : "—";
+  $("cumulative-gpa").textContent = cumText;
   $("cumulative-credits").textContent = totalCredits % 1 === 0 ? totalCredits : totalCredits.toFixed(1);
+  if (potentialEl) potentialEl.textContent = cumText;
+  if (potentialHint) {
+    const creditsText = totalCredits % 1 === 0 ? totalCredits : totalCredits.toFixed(1);
+    potentialHint.textContent = totalCredits > 0 ? `${creditsText} graded credits total` : "";
+  }
 }
 
 function approximateLetter(gpa) {

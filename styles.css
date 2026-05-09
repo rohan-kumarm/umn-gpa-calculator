@@ -259,6 +259,13 @@ table.courses select:focus {
   color: var(--maroon);
   font-variant-numeric: tabular-nums;
 }
+.result-sub {
+  font-size: 11px;
+  color: var(--ink-soft);
+  margin-top: 2px;
+}
+.result-card.highlight .result-sub { color: rgba(255,255,255,0.75); }
+.result-sub:empty { display: none; }
 
 .hint {
   font-size: 13px;
